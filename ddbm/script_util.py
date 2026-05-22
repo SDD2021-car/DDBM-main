@@ -4,7 +4,7 @@ from .karras_diffusion import KarrasDenoiser
 from .unet import UNetModel
 from .edm_unet import SongUNet
 import numpy as np
-
+import inspect
 NUM_CLASSES = 1000
 
 
@@ -73,9 +73,9 @@ def model_and_diffusion_defaults():
         attention_type='flash',
         learn_sigma=False,
         condition_mode='concat',
-        dump_resblock_index=None,
-        dump_feature_dir=None,
-        dump_feature_format='npy',
+        dump_resblock_index=0,
+        dump_feature_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/botblock_features20",
+        dump_feature_format='png',
         pred_mode='ve',
         weight_schedule="bridge_karras",
     )
@@ -200,7 +200,7 @@ def create_model(
         attention_ds.append(image_size // int(res))
     
     if unet_type == 'adm':
-        return UNetModel(
+        unet_kwargs = dict(
             image_size=image_size,
             in_channels=in_channels,
             model_channels=num_channels,
@@ -220,10 +220,15 @@ def create_model(
             use_new_attention_order=use_new_attention_order,
             attention_type=attention_type,
             condition_mode=condition_mode,
-            dump_resblock_index=dump_resblock_index,
-            dump_feature_dir=dump_feature_dir,
-            dump_feature_format=dump_feature_format,
         )
+        init_params = inspect.signature(UNetModel.__init__).parameters
+        if "dump_resblock_index" in init_params:
+            unet_kwargs["dump_resblock_index"] = dump_resblock_index
+        if "dump_feature_dir" in init_params:
+            unet_kwargs["dump_feature_dir"] = dump_feature_dir
+        if "dump_feature_format" in init_params:
+            unet_kwargs["dump_feature_format"] = dump_feature_format
+        return UNetModel(**unet_kwargs)
     elif unet_type == 'edm':
         return SongUNet(
             img_resolution=image_size,

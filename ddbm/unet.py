@@ -746,7 +746,7 @@ class UNetModel(nn.Module):
             return
         os.makedirs(self.dump_feature_dir, exist_ok=True)
         arr = tensor.detach().float().cpu().numpy()
-        filename = f"resblock_{self._dump_counter:05d}_{tag}"
+        filename = f"resblock_{self._dump_counter:05d}_{tag}_{self.dump_resblock_index}"
         if self.dump_feature_format == "png":
             # Save the first sample/channel as grayscale preview.
             img = arr[0, 0]

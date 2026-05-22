@@ -151,10 +151,12 @@ def main():
     else:
         raise NotImplementedError
     args.num_samples = len(dataloader.dataset)
-
+    if args.max_batches is not None:
+        args.num_samples = min(args.num_samples, args.batch_size * args.max_batches * dist.get_world_size())
 
     for i, data in enumerate(dataloader):
-        
+        if args.max_batches is not None and i >= args.max_batches:
+            break
         x0_image = data[0]
         x0_filename = data[3]
         x0 = x0_image.to(dist_util.dev()) * 2 -1
@@ -247,9 +249,10 @@ def create_argparser():
         ts="200",
         upscale=False,
         num_workers=2,
+        max_batches=1,
         guidance=0.5,
-        dump_resblock_index=1,
-        dump_feature_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/botblock_features2",
+        dump_resblock_index=0,
+        dump_feature_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/botblock_features20",
         dump_feature_format="png",
     )
     defaults.update(model_and_diffusion_defaults())
