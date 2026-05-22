@@ -6,7 +6,7 @@ import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-
+import os
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
     checkpoint,
@@ -555,6 +555,9 @@ class UNetModel(nn.Module):
         use_new_attention_order=False,
         attention_type='flash',
         condition_mode=None,
+        dump_resblock_index=None,
+        dump_feature_dir=None,
+        dump_feature_format="npy",
     ):
         super().__init__()
 
@@ -578,7 +581,10 @@ class UNetModel(nn.Module):
         self.num_heads_upsample = num_heads_upsample
 
         self.condition_mode = condition_mode
-
+        self.dump_resblock_index = dump_resblock_index
+        self.dump_feature_dir = dump_feature_dir
+        self.dump_feature_format = dump_feature_format
+        self._dump_counter = 0
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),
@@ -734,6 +740,25 @@ class UNetModel(nn.Module):
             zero_module(conv_nd(dims, input_ch, 3, 3, padding=1)),
         )
 
+
+    def _save_feature_map(self, tensor, tag):
+        if self.dump_feature_dir is None:
+            return
+        os.makedirs(self.dump_feature_dir, exist_ok=True)
+        arr = tensor.detach().float().cpu().numpy()
+        filename = f"resblock_{self._dump_counter:05d}_{tag}"
+        if self.dump_feature_format == "png":
+            # Save the first sample/channel as grayscale preview.
+            img = arr[0, 0]
+            img = img - img.min()
+            if img.max() > 0:
+                img = img / img.max()
+            img = (img * 255.0).astype(np.uint8)
+            from PIL import Image
+            Image.fromarray(img).save(os.path.join(self.dump_feature_dir, f"{filename}.png"))
+        else:
+            np.save(os.path.join(self.dump_feature_dir, f"{filename}.npy"), arr)
+
     def convert_to_fp16(self):
         """
         Convert the torso of the model to float16.
@@ -774,8 +799,27 @@ class UNetModel(nn.Module):
             emb = emb + self.label_emb(y)
 
         h = x.type(self.dtype)
+        resblock_seen = 0
         for module in self.input_blocks:
+            if (
+                not self.training
+                and self.dump_resblock_index is not None
+                and len(module) > 0
+                and isinstance(module[0], ResBlock)
+                and resblock_seen == self.dump_resblock_index
+            ):
+                self._save_feature_map(h, "input")
             h = module(h, emb)
+            if (
+                not self.training
+                and self.dump_resblock_index is not None
+                and len(module) > 0
+                and isinstance(module[0], ResBlock)
+            ):
+                if resblock_seen == self.dump_resblock_index:
+                    self._save_feature_map(h, "output")
+                    self._dump_counter += 1
+                resblock_seen += 1
             hs.append(h)
         h = self.middle_block(h, emb)
         for module in self.output_blocks:

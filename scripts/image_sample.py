@@ -113,7 +113,18 @@ def main():
         dist_util.load_state_dict(args.model_path, map_location="cpu")
     )
     model = model.to(dist_util.dev())
-    
+    target_model = model.module if hasattr(model, "module") else model
+    if hasattr(target_model, "dump_resblock_index"):
+        dump_dir = args.dump_feature_dir if args.dump_feature_dir else None
+        target_model.dump_resblock_index = args.dump_resblock_index
+        target_model.dump_feature_dir = dump_dir
+        target_model.dump_feature_format = args.dump_feature_format
+        target_model._dump_counter = 0
+    else:
+        logger.log(
+            f"[feature_dump] current model type {type(target_model).__name__} does not support ResBlock dump; "
+            f"set --unet_type adm to enable."
+        )
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
@@ -220,7 +231,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        data_dir="/data/yjy_data/pix2pix_and_cyclegan_0808/result_S2O_new/combine", ## only used in bridge
+        data_dir="/data/hjf/Dataset/SEN12_Scene/combine", ## only used in bridge
         dataset='edges2handbags',
         clip_denoised=True,
         num_samples=10000,
@@ -230,13 +241,16 @@ def create_argparser():
         churn_step_ratio=0.1,
         rho=7.0,
         steps=100,
-        model_path="/data/yjy_data/DDBM/logs_S2O_3/ema_0.9999_200000.pt",
-        exp="logs_S2O_3",
+        model_path="/NAS_data/cyh/DDBM_GT_Unet/pure_DDBM_alpha_learnable/ema_2_0.9999_200000.pt",
+        exp="pure_DDBM_alpha_learnable",
         seed=42,
         ts="200",
         upscale=False,
         num_workers=2,
         guidance=0.5,
+        dump_resblock_index=1,
+        dump_feature_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/botblock_features2",
+        dump_feature_format="png",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

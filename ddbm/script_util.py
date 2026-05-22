@@ -37,7 +37,7 @@ def sample_defaults():
         s_tmax=80,
         s_noise=1.0,
         steps=200,
-        model_path="/data/yjy_data/DDBM/logs_S2O_3/ema_0.9999_200000.pt",
+        model_path="/NAS_data/cyh/DDBM_GT_Unet/pure_DDBM_alpha_learnable/ema_2_0.9999_200000.pt",
         seed=42,
         ts="200",
     )
@@ -55,7 +55,7 @@ def model_and_diffusion_defaults():
         cov_xy=0.,
         image_size=256,
         in_channels=3,
-        num_channels=192,
+        num_channels=128,
         num_res_blocks=3,
         num_heads=4,
         num_heads_upsample=-1,
@@ -73,6 +73,9 @@ def model_and_diffusion_defaults():
         attention_type='flash',
         learn_sigma=False,
         condition_mode='concat',
+        dump_resblock_index=None,
+        dump_feature_dir=None,
+        dump_feature_format='npy',
         pred_mode='ve',
         weight_schedule="bridge_karras",
     )
@@ -99,6 +102,9 @@ def create_model_and_diffusion(
     use_new_attention_order,
     attention_type,
     condition_mode,
+    dump_resblock_index,
+    dump_feature_dir,
+    dump_feature_format,
     pred_mode,
     weight_schedule,
     sigma_data=0.5,
@@ -130,6 +136,9 @@ def create_model_and_diffusion(
         use_new_attention_order=use_new_attention_order,
         attention_type=attention_type,
         condition_mode=condition_mode,
+        dump_resblock_index=dump_resblock_index,
+        dump_feature_dir=dump_feature_dir,
+        dump_feature_format=dump_feature_format,
     )
     diffusion = KarrasDenoiser(
         sigma_data=sigma_data,
@@ -166,6 +175,9 @@ def create_model(
     use_new_attention_order=False,
     attention_type='flash',
     condition_mode=None,
+    dump_resblock_index=None,
+    dump_feature_dir=None,
+    dump_feature_format='npy',
 ):
     if channel_mult == "":
         if image_size == 512:
@@ -208,6 +220,9 @@ def create_model(
             use_new_attention_order=use_new_attention_order,
             attention_type=attention_type,
             condition_mode=condition_mode,
+            dump_resblock_index=dump_resblock_index,
+            dump_feature_dir=dump_feature_dir,
+            dump_feature_format=dump_feature_format,
         )
     elif unet_type == 'edm':
         return SongUNet(
