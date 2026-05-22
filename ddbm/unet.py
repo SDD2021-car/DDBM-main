@@ -580,7 +580,9 @@ class UNetModel(nn.Module):
         self.num_heads_upsample = num_heads_upsample
 
         self.condition_mode = condition_mode
-
+        self.feature_dump_dir = "/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/inputblock_feature_dump1"
+        self.feature_dump_max_steps = 10
+        self.feature_dump_step = 0
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),

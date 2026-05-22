@@ -5,7 +5,7 @@ numpy array. This can be used to produce samples for FID evaluation.
 
 import argparse
 import os
-
+import time
 import numpy as np
 import torch as th
 import torchvision.utils as vutils
@@ -20,12 +20,13 @@ from ddbm.script_util import (
     add_dict_to_argparser,
     args_to_dict,
 )
+from torch.utils.data import DataLoader
 from ddbm.random_util import get_generator
 from ddbm.karras_diffusion import karras_sample, forward_sample
 from datasets.image_folder import load_data
 
 from pathlib import Path
-
+from ddbm.unet import ResBlock
 from PIL import Image
 def get_workdir(exp):
     workdir = f'{exp}'
@@ -116,21 +117,52 @@ def main():
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
+    feature_ctx = {"step": 0}
+    feature_handles = []
     if args.dump_inputblock_features:
-        if not hasattr(model, "configure_feature_dump"):
-            raise AttributeError(
-                "Current model does not implement configure_feature_dump. "
-                "Please use UNetModel (unet_type='adm') or add this method to your model."
-            )
-        dump_dir = (
-            Path(args.feature_dump_dir)
-            if args.feature_dump_dir
-            else sample_dir / "inputblock_feature_dump"
-        )
-        model.configure_feature_dump(
-            dump_dir=str(dump_dir),
-            max_steps=args.dump_feature_steps if args.dump_feature_steps > 0 else None,
-        )
+        if not hasattr(model, "input_blocks"):
+            raise AttributeError("Current model has no input_blocks; cannot locate first ResBlock.")
+        first_resblock = None
+        first_block_idx = None
+        for block_idx, block in enumerate(model.input_blocks):
+            for layer in block:
+                if isinstance(layer, ResBlock):
+                    first_resblock = layer
+                    first_block_idx = block_idx
+                    break
+            if first_resblock is not None:
+                break
+        if first_resblock is None:
+            raise RuntimeError("No ResBlock found in model.input_blocks.")
+
+        dump_dir = Path(args.feature_dump_dir) if args.feature_dump_dir else sample_dir / "inputblock_feature_dump"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+
+        def _save_feature_map(tensor: th.Tensor, out_base: Path):
+            feat = tensor.detach().float().cpu().numpy()
+            np.save(str(out_base) + ".npy", feat)
+            vis = feat[0, 0]
+            vis = vis - vis.min()
+            vis = vis / (vis.max() + 1e-8)
+            Image.fromarray((vis * 255.0).astype(np.uint8)).save(str(out_base) + ".png")
+
+        def _pre_hook(_module, inputs):
+            if args.dump_feature_steps > 0 and feature_ctx["step"] >= args.dump_feature_steps:
+                return
+            x_in = inputs[0]
+            base = dump_dir / f"step{feature_ctx['step']:05d}_block{first_block_idx:02d}_in"
+            _save_feature_map(x_in, base)
+
+        def _fwd_hook(_module, _inputs, output):
+            if args.dump_feature_steps > 0 and feature_ctx["step"] >= args.dump_feature_steps:
+                feature_ctx["step"] += 1
+                return
+            base = dump_dir / f"step{feature_ctx['step']:05d}_block{first_block_idx:02d}_out"
+            _save_feature_map(output, base)
+            feature_ctx["step"] += 1
+
+        feature_handles.append(first_resblock.register_forward_pre_hook(_pre_hook))
+        feature_handles.append(first_resblock.register_forward_hook(_fwd_hook))
 
     logger.log("sampling...")
     
@@ -153,6 +185,26 @@ def main():
         dataloader = all_dataloaders[2]
     else:
         raise NotImplementedError
+    if args.random_sample_order:
+        sampler = th.utils.data.DistributedSampler(
+            dataloader.dataset,
+            num_replicas=dist.get_world_size(),
+            rank=dist.get_rank(),
+            shuffle=True,
+            drop_last=False,
+            seed=args.seed,
+        )
+
+        dynamic_epoch = int(time.time())
+        sampler.set_epoch(dynamic_epoch)
+
+        dataloader = DataLoader(
+            dataloader.dataset,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            num_workers=args.num_workers,
+            drop_last=False,
+        )
     args.num_samples = len(dataloader.dataset)
 
 
@@ -229,6 +281,8 @@ def main():
         np.savez(out_path, arr)
 
     dist.barrier()
+    for handle in feature_handles:
+        handle.remove()
     logger.log("sampling complete")
 
 
@@ -253,7 +307,8 @@ def create_argparser():
         guidance=0.5,
         dump_inputblock_features=True,
         dump_feature_steps=1,
-        feature_dump_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/inputblock_feature_dump",
+        feature_dump_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/inputblock_feature_dump1",
+        random_sample_order=True,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
