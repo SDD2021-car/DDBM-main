@@ -113,18 +113,6 @@ def main():
         dist_util.load_state_dict(args.model_path, map_location="cpu")
     )
     model = model.to(dist_util.dev())
-    target_model = model.module if hasattr(model, "module") else model
-    if hasattr(target_model, "dump_resblock_index"):
-        dump_dir = args.dump_feature_dir if args.dump_feature_dir else None
-        target_model.dump_resblock_index = args.dump_resblock_index
-        target_model.dump_feature_dir = dump_dir
-        target_model.dump_feature_format = args.dump_feature_format
-        target_model._dump_counter = 0
-    else:
-        logger.log(
-            f"[feature_dump] current model type {type(target_model).__name__} does not support ResBlock dump; "
-            f"set --unet_type adm to enable."
-        )
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
@@ -151,12 +139,10 @@ def main():
     else:
         raise NotImplementedError
     args.num_samples = len(dataloader.dataset)
-    if args.max_batches is not None:
-        args.num_samples = min(args.num_samples, args.batch_size * args.max_batches * dist.get_world_size())
+
 
     for i, data in enumerate(dataloader):
-        if args.max_batches is not None and i >= args.max_batches:
-            break
+
         x0_image = data[0]
         x0_filename = data[3]
         x0 = x0_image.to(dist_util.dev()) * 2 -1
@@ -249,11 +235,7 @@ def create_argparser():
         ts="200",
         upscale=False,
         num_workers=2,
-        max_batches=1,
         guidance=0.5,
-        dump_resblock_index=0,
-        dump_feature_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/botblock_features20",
-        dump_feature_format="png",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
