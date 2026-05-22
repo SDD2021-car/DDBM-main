@@ -1,11 +1,13 @@
 from abc import abstractmethod
 
 import math
+import os
 
 import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from PIL import Image
 
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
@@ -750,6 +752,24 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
+    def configure_feature_dump(self, dump_dir=None, max_steps=None):
+        self.feature_dump_dir = dump_dir
+        self.feature_dump_max_steps = max_steps
+        self.feature_dump_step = 0
+        if dump_dir:
+            os.makedirs(dump_dir, exist_ok=True)
+
+    def _save_feature_map(self, tensor, base_name):
+        if self.feature_dump_dir is None:
+            return
+        feat = tensor.detach().float().cpu().numpy()
+        np.save(os.path.join(self.feature_dump_dir, f"{base_name}.npy"), feat)
+        vis = feat[0, 0]
+        vis = vis - vis.min()
+        vis = vis / (vis.max() + 1e-8)
+        img = (vis * 255.0).astype(np.uint8)
+        Image.fromarray(img).save(os.path.join(self.feature_dump_dir, f"{base_name}.png"))
+
     def forward(self, x, timesteps, xT=None, y=None):
         """
         Apply the model to an input batch.
@@ -774,9 +794,31 @@ class UNetModel(nn.Module):
             emb = emb + self.label_emb(y)
 
         h = x.type(self.dtype)
-        for module in self.input_blocks:
+        dump_enabled = (
+            hasattr(self, "feature_dump_dir")
+            and self.feature_dump_dir is not None
+            and (
+                getattr(self, "feature_dump_max_steps", None) is None
+                or self.feature_dump_step < self.feature_dump_max_steps
+            )
+        )
+        for block_idx, module in enumerate(self.input_blocks):
+            if dump_enabled:
+                for layer in module:
+                    if isinstance(layer, ResBlock):
+                        base = f"step{self.feature_dump_step:05d}_block{block_idx:02d}"
+                        self._save_feature_map(h, f"{base}_in")
+                        break
             h = module(h, emb)
+            if dump_enabled:
+                for layer in module:
+                    if isinstance(layer, ResBlock):
+                        base = f"step{self.feature_dump_step:05d}_block{block_idx:02d}"
+                        self._save_feature_map(h, f"{base}_out")
+                        break
             hs.append(h)
+        if dump_enabled:
+            self.feature_dump_step += 1
         h = self.middle_block(h, emb)
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)

@@ -116,6 +116,21 @@ def main():
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
+    if args.dump_inputblock_features:
+        if not hasattr(model, "configure_feature_dump"):
+            raise AttributeError(
+                "Current model does not implement configure_feature_dump. "
+                "Please use UNetModel (unet_type='adm') or add this method to your model."
+            )
+        dump_dir = (
+            Path(args.feature_dump_dir)
+            if args.feature_dump_dir
+            else sample_dir / "inputblock_feature_dump"
+        )
+        model.configure_feature_dump(
+            dump_dir=str(dump_dir),
+            max_steps=args.dump_feature_steps if args.dump_feature_steps > 0 else None,
+        )
 
     logger.log("sampling...")
     
@@ -236,6 +251,9 @@ def create_argparser():
         upscale=False,
         num_workers=2,
         guidance=0.5,
+        dump_inputblock_features=True,
+        dump_feature_steps=1,
+        feature_dump_dir="/data/yjy_data/DDBM_GT_Unet/save_features_DDBM/inputblock_feature_dump",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
